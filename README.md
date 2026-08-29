@@ -7,8 +7,11 @@ image at the yaw and pitch it was shot at, instead of aligning to a grid.
 ## Install
 
 ```
-go install github.com/itdwgmbh/panoxml@latest
+make install
 ```
+
+Builds and copies the binary to `~/.local/bin`. `PREFIX=/usr/local make install`
+puts it elsewhere.
 
 ## Use
 
