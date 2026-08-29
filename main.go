@@ -47,6 +47,10 @@ func run(dir, out string) error {
 		}
 	}
 	sort.Slice(shots, func(i, j int) bool { return natLess(shots[i].Name, shots[j].Name) })
+	shots, foreign := dropForeign(shots)
+	for _, s := range foreign {
+		fmt.Fprintf(os.Stderr, "skipped %s: %dx%d, not a frame of this panorama\n", s.Name, s.Width, s.Height)
+	}
 	unwrapYaw(shots)
 
 	sets := bracketSets(shots)
@@ -131,6 +135,36 @@ func imageFiles(dir string) ([]string, error) {
 	}
 	slices.Sort(paths)
 	return paths, nil
+}
+
+// dropForeign keeps the frames whose pixel size the majority of the folder
+// shares. A stitched panorama or an exported preview saved next to the source
+// frames carries gimbal angles copied from the first frame, so without this it
+// would be taken for a position and shift every image onto the wrong one.
+func dropForeign(shots []Shot) (kept, foreign []Shot) {
+	if len(shots) < 2 {
+		return shots, nil
+	}
+	type size struct{ w, h uint32 }
+	count := map[size]int{}
+	for _, s := range shots {
+		count[size{s.Width, s.Height}]++
+	}
+	var main size
+	for sz, n := range count {
+		cur := count[main]
+		if n > cur || (n == cur && uint64(sz.w)*uint64(sz.h) < uint64(main.w)*uint64(main.h)) {
+			main = sz
+		}
+	}
+	for _, s := range shots {
+		if (size{s.Width, s.Height}) == main {
+			kept = append(kept, s)
+		} else {
+			foreign = append(foreign, s)
+		}
+	}
+	return kept, foreign
 }
 
 // unwrapYaw removes the jump at +/-180 degrees so a panorama that crosses north

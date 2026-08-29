@@ -36,6 +36,11 @@ Images are ordered by file name with digit runs compared numerically, matching
 the order PTGui loads them in. A folder holding RAW+JPEG pairs of the same shot
 contributes the RAW only.
 
+Files whose pixel size differs from the rest of the folder are skipped and
+named on stderr. A stitched panorama written back beside its source frames
+carries the first frame's gimbal angles, so leaving it in would shift every
+image onto the wrong position.
+
 Bracketing needs no flag. Consecutive frames sharing a gimbal position form one
 bracket set and get `bracket="1"`, `"2"`, `"3"` inside a `<pict>` element each.
 PTGui counts images when the project is unbracketed and bracket sets when it is

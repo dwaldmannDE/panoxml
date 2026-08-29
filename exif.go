@@ -20,12 +20,15 @@ const (
 
 // TIFF/Exif tags read from the files.
 const (
-	tagModel     = 0x0110
-	tagXMP       = 0x02bc
-	tagExifIFD   = 0x8769
-	tagDateTaken = 0x9003
-	tagFocal     = 0x920a
-	tagFocal35   = 0xa405
+	tagImageWidth  = 0x0100
+	tagImageLength = 0x0101
+	tagModel       = 0x0110
+	tagSubIFDs     = 0x014a
+	tagXMP         = 0x02bc
+	tagExifIFD     = 0x8769
+	tagDateTaken   = 0x9003
+	tagFocal       = 0x920a
+	tagFocal35     = 0xa405
 )
 
 // Shot is the metadata of one source image needed to place it in a panorama.
@@ -40,6 +43,8 @@ type Shot struct {
 	Model   string  // Exif Model, e.g. FC9287
 	Product string  // drone-dji:ProductName, e.g. Mavic4 Pro L3B
 	Taken   string  // Exif DateTimeOriginal
+	Width   uint32  // pixel size of the largest image in the file
+	Height  uint32
 
 	hasAngles bool
 }
@@ -118,8 +123,20 @@ func readTIFF(r io.ReaderAt, s *Shot) error {
 	if err != nil {
 		return err
 	}
+	t.recordSize(ifd0, s)
 	for _, e := range ifd0 {
 		switch e.tag {
+		case tagSubIFDs:
+			// In a DNG, IFD0 holds only the thumbnail; the full frame is in a SubIFD.
+			b, err := t.value(e)
+			if err != nil {
+				continue
+			}
+			for i := 0; i+4 <= len(b); i += 4 {
+				if sub, err := t.readIFD(int64(t.bo.Uint32(b[i:]))); err == nil {
+					t.recordSize(sub, s)
+				}
+			}
 		case tagModel:
 			s.Model = t.ascii(e)
 		case tagXMP:
@@ -186,6 +203,12 @@ func readJPEG(r io.ReaderAt, size int64, s *Shot) error {
 		if _, err := io.ReadFull(br, payload); err != nil {
 			return nil
 		}
+		// SOFn carries the frame size, and outranks the Exif thumbnail.
+		if b >= 0xc0 && b <= 0xcf && b != 0xc4 && b != 0xc8 && b != 0xcc && len(payload) >= 5 {
+			s.Height = uint32(binary.BigEndian.Uint16(payload[1:3]))
+			s.Width = uint32(binary.BigEndian.Uint16(payload[3:5]))
+			continue
+		}
 		if b != 0xe1 { // APP1 carries both Exif and XMP
 			continue
 		}
@@ -195,6 +218,22 @@ func readJPEG(r io.ReaderAt, size int64, s *Shot) error {
 		case bytes.HasPrefix(payload, []byte(xmpAPP1ID)):
 			parseXMP(payload[len(xmpAPP1ID):], s)
 		}
+	}
+}
+
+// recordSize keeps the largest image size found anywhere in the file.
+func (t *tiffReader) recordSize(entries []ifdEntry, s *Shot) {
+	var w, h uint32
+	for _, e := range entries {
+		switch e.tag {
+		case tagImageWidth:
+			w = t.uint(e)
+		case tagImageLength:
+			h = t.uint(e)
+		}
+	}
+	if uint64(w)*uint64(h) > uint64(s.Width)*uint64(s.Height) {
+		s.Width, s.Height = w, h
 	}
 }
 

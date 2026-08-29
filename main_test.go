@@ -132,7 +132,7 @@ func TestRun(t *testing.T) {
 		if i >= 3 {
 			xmp = replaceYaw(sampleXMP, "+5.30")
 		}
-		if err := os.WriteFile(filepath.Join(dir, n), buildTIFF(xmp), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, n), buildTIFF(xmp, true), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -159,4 +159,26 @@ func replaceYaw(xmp, yaw string) string {
 	return string(bytes.Replace([]byte(xmp),
 		[]byte(`drone-dji:GimbalYawDegree="-2.40"`),
 		[]byte(`drone-dji:GimbalYawDegree="`+yaw+`"`), 1))
+}
+
+// A stitched panorama saved next to the source frames carries the first
+// frame's gimbal angles. It must not be taken for a position.
+func TestDropForeign(t *testing.T) {
+	shots := []Shot{
+		{Name: "pano.dng", Width: 41645, Height: 10093},
+		{Name: "a.dng", Width: 4088, Height: 3064},
+		{Name: "b.dng", Width: 4088, Height: 3064},
+		{Name: "c.dng", Width: 4088, Height: 3064},
+	}
+	kept, foreign := dropForeign(shots)
+	if len(kept) != 3 || len(foreign) != 1 || foreign[0].Name != "pano.dng" {
+		t.Fatalf("kept %d, foreign %v", len(kept), foreign)
+	}
+}
+
+func TestDropForeignKeepsUniformSet(t *testing.T) {
+	shots := []Shot{{Width: 4088, Height: 3064}, {Width: 4088, Height: 3064}}
+	if kept, foreign := dropForeign(shots); len(kept) != 2 || len(foreign) != 0 {
+		t.Errorf("kept %d, foreign %d, want 2, 0", len(kept), len(foreign))
+	}
 }

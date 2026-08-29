@@ -32,16 +32,25 @@ func (w *tiffWriter) entry(tag, typ uint16, count, val uint32) {
 	w.u32(val)
 }
 
-// buildTIFF lays out a minimal DNG-shaped file: IFD0 with Model, optional XMP
-// and a pointer to an Exif IFD holding the focal lengths.
-func buildTIFF(xmp string) []byte {
+// buildTIFF lays out a minimal DNG-shaped file: IFD0 with a thumbnail size,
+// Model, optional XMP, an optional SubIFD holding the full frame size, and a
+// pointer to an Exif IFD with the focal lengths.
+func buildTIFF(xmp string, subIFD bool) []byte {
 	const model = "FC9287\x00"
-	entries := uint32(2)
+	entries := uint32(4) // width, length, model, exif pointer
 	if xmp != "" {
-		entries = 3
+		entries++
+	}
+	if subIFD {
+		entries++
 	}
 	modelOff := 8 + 2 + entries*12 + 4
-	xmpOff := modelOff + uint32(len(model))
+	subOff := modelOff + uint32(len(model))
+	subLen := uint32(0)
+	if subIFD {
+		subLen = 2 + 2*12 + 4
+	}
+	xmpOff := subOff + subLen
 	exifOff := xmpOff + uint32(len(xmp))
 	ratOff := exifOff + 2 + 2*12 + 4
 
@@ -50,13 +59,24 @@ func buildTIFF(xmp string) []byte {
 	w.u16(42)
 	w.u32(8)
 	w.u16(uint16(entries))
+	w.entry(tagImageWidth, 4, 1, 255) // IFD0 holds only the thumbnail
+	w.entry(tagImageLength, 4, 1, 191)
 	w.entry(tagModel, 2, uint32(len(model)), modelOff)
+	if subIFD {
+		w.entry(tagSubIFDs, 4, 1, subOff)
+	}
 	if xmp != "" {
 		w.entry(tagXMP, 1, uint32(len(xmp)), xmpOff)
 	}
 	w.entry(tagExifIFD, 4, 1, exifOff)
 	w.u32(0)
 	w.b = append(w.b, model...)
+	if subIFD {
+		w.u16(2)
+		w.entry(tagImageWidth, 4, 1, 4088)
+		w.entry(tagImageLength, 4, 1, 3064)
+		w.u32(0)
+	}
 	w.b = append(w.b, xmp...)
 	w.u16(2)
 	w.entry(tagFocal, 5, 1, ratOff)
@@ -76,6 +96,11 @@ func buildJPEG(tiff []byte, xmp string) []byte {
 	}
 	app1(append([]byte(exifAPP1), tiff...))
 	app1(append([]byte(xmpAPP1ID), xmp...))
+	// SOF0: precision, height, width, one component.
+	b = append(b, 0xff, 0xc0, 0x00, 0x0b, 0x08)
+	b = binary.BigEndian.AppendUint16(b, 3064)
+	b = binary.BigEndian.AppendUint16(b, 4088)
+	b = append(b, 0x01, 0x01, 0x11, 0x00)
 	return append(b, 0xff, 0xd9)
 }
 
@@ -96,6 +121,9 @@ func checkShot(t *testing.T, s Shot) {
 	if s.Focal != 40 || s.Focal35 != 168 {
 		t.Errorf("focal = %v/%v, want 40/168", s.Focal, s.Focal35)
 	}
+	if s.Width != 4088 || s.Height != 3064 {
+		t.Errorf("size = %dx%d, want 4088x3064", s.Width, s.Height)
+	}
 	if s.Model != "FC9287" || s.Product != "Mavic4 Pro L3B" {
 		t.Errorf("model = %q/%q", s.Model, s.Product)
 	}
@@ -105,7 +133,7 @@ func checkShot(t *testing.T, s Shot) {
 }
 
 func TestReadShotDNG(t *testing.T) {
-	s, err := ReadShot(write(t, "a.dng", buildTIFF(sampleXMP)))
+	s, err := ReadShot(write(t, "a.dng", buildTIFF(sampleXMP, true)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +142,7 @@ func TestReadShotDNG(t *testing.T) {
 
 // The JPEG carries its XMP in its own APP1 segment, not in the Exif block.
 func TestReadShotJPEG(t *testing.T) {
-	s, err := ReadShot(write(t, "a.jpg", buildJPEG(buildTIFF(""), sampleXMP)))
+	s, err := ReadShot(write(t, "a.jpg", buildJPEG(buildTIFF("", false), sampleXMP)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +150,7 @@ func TestReadShotJPEG(t *testing.T) {
 }
 
 func TestReadShotWithoutAngles(t *testing.T) {
-	if _, err := ReadShot(write(t, "a.dng", buildTIFF(""))); err == nil {
+	if _, err := ReadShot(write(t, "a.dng", buildTIFF("", true))); err == nil {
 		t.Fatal("want an error for a file without gimbal angles")
 	}
 }
@@ -153,7 +181,7 @@ func TestReadShotDJINamespaceVariants(t *testing.T) {
 		"http://www.dji.com/drone-dji/1.0/",
 	} {
 		xmp := strings.Replace(sampleXMP, "http://www.uav.com/drone-dji/1.0/", ns, 1)
-		s, err := ReadShot(write(t, "a.dng", buildTIFF(xmp)))
+		s, err := ReadShot(write(t, "a.dng", buildTIFF(xmp, true)))
 		if err != nil {
 			t.Fatalf("%s: %v", ns, err)
 		}
