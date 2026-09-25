@@ -10,24 +10,14 @@ image at the yaw and pitch it was shot at, instead of aligning to a grid.
 make install
 ```
 
-Builds and copies the binary to `~/.local/bin`. `PREFIX=/usr/local make install`
-puts it elsewhere.
-
 ## Use
 
 ```
 panoxml ~/Pictures/Import
 ```
 
-Writes `papywizard.xml` into that folder and prints what it found:
-
-```
-225 images, Mavic4 Pro L3B, 40 mm (168 mm equivalent), 75 positions, 3 bracketed exposures each
-15 columns x 5 rows, yaw -2.4 to 109.3 step 8.0, pitch -18.0 to 6.0 step 6.0
-wrote /Users/xw77d/Pictures/Import/papywizard.xml
-```
-
-`-o <file>` writes somewhere else.
+Writes `papywizard.xml` into that folder and prints a summary of what it found
+to stderr. `panoxml -h` lists flags.
 
 ## Details
 
@@ -57,5 +47,5 @@ Every entry carries its source file name as an XML comment.
 ## Test
 
 ```
-go test ./...
+make test
 ```
